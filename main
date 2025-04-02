@@ -1,0 +1,50 @@
+NarrativeCombined = 
+// Section 1: Define the current year and area/metric labels
+VAR CurrentYear = CALCULATE(MAX(data_education_LG[periodLabel]), FILTER(data_education_LG, NOT(ISBLANK(data_education_LG[value]))))
+VAR AreaLabel = SELECTEDVALUE(data_education_LG[areaLabel])
+VAR MetricTypeAltLabel = SELECTEDVALUE(data_education_LG[metricTypeAltLabel])
+
+// Section 2: Calculate current and previous year values
+VAR CurrentValue = CALCULATE(SUM(data_education_LG[value]), data_education_LG[periodLabel] = CurrentYear)
+VAR thePreviousYear = CurrentYear - 1
+VAR PreviousYearValue = CALCULATE(SUM(data_education_LG[value]), data_education_LG[periodLabel] = thePreviousYear)
+
+// Section 3: Calculate values for the valid year (5 years ago or minimum year)
+VAR validYear = IF(CurrentYear - 5 < CALCULATE(MIN(data_education_LG[periodLabel])), CALCULATE(MIN(data_education_LG[periodLabel])), CurrentYear - 5)
+VAR validYearValue = CALCULATE(SUM(data_education_LG[value]), data_education_LG[periodLabel] = validYear)
+VAR yearDifference = CurrentYear - validYear
+VAR previousYearsCalc = CurrentValue - validYearValue
+VAR FiveYearChange = IF(NOT(ISBLANK(validYearValue)), ((CurrentValue - validYearValue) / ABS(validYearValue)) * 100, BLANK())
+
+// Section 4: Calculate ranking and polarity
+VAR RankMe = LOOKUPVALUE(rankingData[value], rankingData[metricTypeLabel], SELECTEDVALUE(data_education_LG[metricTypeLabel]), rankingData[areaLabel], AreaLabel, rankingData[valueTypeLabel], "Rank within England Local authorities")
+VAR TotalPlaces = CALCULATE(COUNTROWS(rankingData), rankingData[metricTypeAltLabel] = MetricTypeAltLabel)
+VAR incDec = IF(previousYearsCalc >= 0, "increase", "decrease")
+VAR PolarityCheck = IF(LOWER(SELECTEDVALUE(metadata[Polarity])) = "not applicable", "with no given polarity.", "where 1 is best.")
+
+// Section 5: Calculate the latest year value for Hartlepool
+VAR LatestYearValue = 
+    VAR HartPop = CALCULATE(MAX('Adult population'[value]), 'Adult population'[areaLabel] = "Hartlepool", 'Adult population'[periodLabel] = MAX(data_education_LG[periodLabel]))
+    VAR metricTypeLabel = SELECTEDVALUE(data_education_LG[metricTypeLabel])
+    VAR isNum = IF(NOT(ISBLANK(metricTypeLabel)) && LEFT(metricTypeLabel, 3) = "No.", TRUE(), FALSE())
+    VAR dataValue = CALCULATE(MAX(data_education_LG[value]), data_education_LG[areaLabel] = "Hartlepool", data_education_LG[periodLabel] = MAX(data_education_LG[periodLabel]))
+    VAR measureSelect = MAX(metadata[Measure])
+    VAR measureCheck = IF(CONTAINSSTRING(measureSelect, "Percentage") || CONTAINSSTRING(measureSelect, "Percent") || CONTAINSSTRING(measureSelect, "%"), "%", "")
+    RETURN IF(isNum, FORMAT((dataValue / HartPop) * 10000, "0.00") & " per 10,000", FORMAT(dataValue, "#,#0.0") & measureCheck)
+
+// Section 6: Adjust current value format and determine difference label
+VAR isValueRate = CONTAINSSTRING(LatestYearValue, "per 10,000")
+VAR AdjustedCurrentValue = IF(isValueRate, LatestYearValue, FORMAT(CurrentValue, "0.00") & "%")
+VAR DifferenceLabel = IF(isValueRate, "", " percentage point")
+VAR PreviousYearValueFormatted = IF(isValueRate, FORMAT(PreviousYearValue, "0.00"), FORMAT(PreviousYearValue, "0.00") & "%")
+
+// Section 7: Return the narrative
+RETURN
+    "In " & CurrentYear & " in " & AreaLabel & ", the " & MetricTypeAltLabel & " was recorded at " &
+    AdjustedCurrentValue & ". The previous year (" & thePreviousYear & ") had a recorded value of " &
+    PreviousYearValueFormatted & ", so this represents a " &
+    FORMAT(CurrentValue - PreviousYearValue, "0.00") & DifferenceLabel & " difference. Over the past " & 
+    yearDifference & " years, there has been an " &
+    FORMAT(ABS(previousYearsCalc), "0.00") & DifferenceLabel & " " & incDec & ". " & AreaLabel & " ranks " & 
+    RankMe & " out of " & TotalPlaces &
+    " local authorities for this indicator " & PolarityCheck
